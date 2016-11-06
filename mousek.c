@@ -1,8 +1,11 @@
 /*
  *  mousek.c, A linux kernel module to control mouse pointer using keyboard
- *	
- *	Copyright (c) 2016 Kush Kumar Sharma *  
+ *  Heavily based on usbmouse.c
+ *  **Experimental**
  *
+ *  Copyright (c) 2016 Kush Kumar Sharma
+ *  Copyright (c) 2000 Alessandro Rubini <rubini@gnu.org>
+ *  Copyright (c) 1999 Vojtech Pavlik <vojtech@suse.cz>
  */
 
 /*
@@ -142,9 +145,9 @@ int mousek_release(struct inode *inode, struct file *filp)
     
 	
 	/*
-         * Decrement the usage count, or else once you opened the file, you'll
-         * never get get rid of the module.
-         */
+	* Decrement the usage count, or else once you opened the file, you'll
+    * never get rid of the module.
+    */
     //module_put(THIS_MODULE);
 	
 	return 0;
@@ -169,7 +172,7 @@ ssize_t mousek_write(struct file *filp, const char *buf, size_t count,
     //struct mousek_device *mouse = filp->private_data;
     static char localbuf[16];
     //struct urb urb;
-    int i;
+    int i, command = -1;
 
     /* accept 16 bytes at a time, at most */
     if (count >16) count=16;
@@ -179,54 +182,202 @@ ssize_t mousek_write(struct file *filp, const char *buf, size_t count,
     //urb.status = USB_ST_NOERROR;
     //urb.context = mousek;
 	struct input_dev *dev = mouse->idev;
+	
+	//first character will tell what command to do
+	//i : instruction sequence like ududdr
+	//x : absolute value in X Axis
+	//y : absolute value in Y Axis
+	//l : left click single, ll : double left click
+	//r : right click
 
-    /* scan written data */
-    for (i=0; i<count; i++) {
-	mouse->data[1] = mouse->data[2] = mouse->data[3] = 0;
-	switch (localbuf[i]) {
-	    case 'u': case 'U': /* up */
-		mouse->data[2] = -50;
-		break;
-	    case 'd': case 'D': /* down */
-		mouse->data[2] = 50;
-		break;
-	    case 'l': case 'L': /* left */
-		mouse->data[1] = -50;
-		break;
-	    case 'r': case 'R': /* right */
-		mouse->data[1] = 50;
-		break;
-		case 'w': case 'W': /* right */
-		mouse->data[3] = 10;
-		break;
-	    default:
-		continue;
+	switch(localbuf[0]){
+	    case 'i': case 'I':{
+	    	command = 0;
+			break;
+		}
+		case 'x': case 'X':{
+			command = 1;
+			break;
+		}
+		case 'y': case 'Y':{
+			command = 2;
+			break;
+		}
+		case 'l': case 'L':{
+			//left click press down
+			input_report_key(dev, BTN_LEFT, 1);
+			//left click up
+			input_report_key(dev, BTN_LEFT, 0);
+			
+			input_sync(dev);
+
+			if(localbuf[1] == 'l')
+			{
+				//left click press down
+				input_report_key(dev, BTN_LEFT, 1);
+				//left click up
+				input_report_key(dev, BTN_LEFT, 0);
+			}
+			
+			break;
+		}
+		case 'r': case 'R':{
+			//right click press down
+			input_report_key(dev, BTN_RIGHT, 1);
+			//right click up
+			input_report_key(dev, BTN_RIGHT, 0);
+			break;
+		}
 	}
+	
+	if(command == 0){
+		/* scan written sequence */
+    	for (i=2; i<count; i++) {
+			mouse->data[1] = mouse->data[2] = mouse->data[3] = 0;
+			
+			switch (localbuf[i]) {
+			    case 'u': case 'U': /* up */
+					mouse->data[2] = -10;
+					break;
+			    case 'd': case 'D': /* down */
+					mouse->data[2] = 10;
+					break;
+			    case 'l': case 'L': /* left */
+					mouse->data[1] = -10;
+					break;
+			    case 'r': case 'R': /* right */
+					mouse->data[1] = 10;
+					break;
+					
+				case 'q': /* left click down */
+					mouse->data[3] = 1;
+					break;
+				case 'Q': /* left click up */
+					mouse->data[3] = 2;
+					break;
+				case 'w': /* right click down */
+					mouse->data[3] = 3;
+					break;
+				case 'W': /* right click up */
+					mouse->data[3] = 4;
+					break;
+			    default:
+			    	i = count;
+				continue;
+			}
+			//input_report_key(dev, BTN_RIGHT, 1);
+			//input_report_key(dev, BTN_RIGHT, 0);
+		
+			//input_report_key(dev, KEY_UP, 1); /* keypress */
+			//input_report_key(dev, KEY_UP, 0); /* release */
+			
+			//input_report_abs(dev, ABS_X, 2+i);
+			//input_report_abs(dev, ABS_Y, 90+i);
+			//input_report_abs(dev, ABS_X, mouse->data[1]);
+			//input_report_abs(dev, ABS_Y, mouse->data[2]);
+			
+			if(mouse->data[1] != 0){
+				input_report_rel(dev, REL_X, mouse->data[1]);
+				
+				input_sync(dev);
+
+			}
+			if(mouse->data[2] != 0){
+				input_report_rel(dev, REL_Y, mouse->data[2]);
+				
+				input_sync(dev);
+
+			}
+
+			//handle queue clicks
+			if(mouse->data[3] != 0){
+				if(mouse->data[3] == 1){
+					input_report_key(dev, BTN_LEFT, 1);					
+				}else if(mouse->data[3] == 2){
+					input_report_key(dev, BTN_LEFT, 0);
+				}else if(mouse->data[3] == 3){
+					input_report_key(dev, BTN_RIGHT, 1);
+				}else if(mouse->data[3] == 4){
+					input_report_key(dev, BTN_RIGHT, 0);
+				}
+				
+				input_sync(dev);
+			} 
+			
+			
+			//input_report_rel(dev, REL_WHEEL, mouse->data[3]);
+			
+
+			
+			//printk(KERN_ALERT "mousek: Control actions of %s received %d %d",localbuf, mouse->data[1], mouse->data[2]);
+			/* if we are here, a valid key is there, fix the urb */
+			//mousek_irq(&urb);
+
+    	}//for
+		
+	}
+	if(command == 1 && count >= 2){
+		//X
+		int val = 0;
+		if(localbuf[2] == '-'){ 
+			//negative
+			val = localbuf[3] - '0'; //converting to int	
+			for (i=4; i < count; i++) {
+				if(localbuf[i] <= '9' && localbuf[i] >= '0'){
+					val *= 10;
+					val += localbuf[i] - '0'; 					
+				}
+			}			
+			val *= -1;			
+		}else{
+			//if not negative
+			val = localbuf[2] - '0'; //converting to int	
+			for (i=3; i < count; i++) {
+				if(localbuf[i] <= '9' && localbuf[i] >= '0'){
+					val *= 10;
+					val += localbuf[i] - '0'; 					
+				}
+			}
+		}
+		//printk(KERN_ALERT "Moving with value %d in X\n", val);
+		
+		input_report_rel(dev, REL_X, val);
+		//input_report_abs(dev, ABS_X, val);
+	}
+	if(command == 2 && count >= 2){
+		//Y
+		int val = 0;
+		if(localbuf[2] == '-'){ 
+			//negative
+			val = localbuf[3] - '0'; //converting to int	
+			for (i=4; i < count; i++) {
+				if(localbuf[i] <= '9' && localbuf[i] >= '0'){
+					val *= 10;
+					val += localbuf[i] - '0'; 					
+				}
+			}			
+			val *= -1;			
+		}else{
+			//if not negative
+			val = localbuf[2] - '0'; //converting to int	
+			for (i=3; i < count; i++) {
+				if(localbuf[i] <= '9' && localbuf[i] >= '0'){
+					val *= 10;
+					val += localbuf[i] - '0'; 					
+				}
+			}
+		}
+		
+		input_report_rel(dev, REL_Y, val);
+		//input_report_abs(dev, ABS_Y, val);
+	}
+    
+
+	//right click press down
 	//input_report_key(dev, BTN_RIGHT, 1);
+	//right click up
 	//input_report_key(dev, BTN_RIGHT, 0);
 
-	//input_report_key(dev, KEY_UP, 1); /* keypress */
-	//input_report_key(dev, KEY_UP, 0); /* release */
-	
-	input_report_abs(dev, ABS_X, 2+i);
-	input_report_abs(dev, ABS_Y, 90+i);
-
-	
-	//input_report_rel(dev, REL_X, mouse->data[1]);
-	//input_report_rel(dev, REL_Y, mouse->data[2]);
-	
-	//input_report_rel(dev, REL_WHEEL, mouse->data[3]);
-	
-	
-	
-	//printk(KERN_ALERT "mousek: Control actions of %s received %d %d",localbuf, mouse->data[1], mouse->data[2]);
-	input_sync(dev);
-
-	/* if we are here, a valid key is there, fix the urb */
-	//mousek_irq(&urb);
-    }
-	input_report_key(dev, BTN_RIGHT, 1);
-	input_report_key(dev, BTN_RIGHT, 0);
 	input_sync(dev);
 
 	//input_report_rel(mouse->idev, REL_WHEEL, data[3]);
@@ -286,17 +437,19 @@ int init_module(void)
     //set_bit(106, mouse->idev.keybit); /* Right */
     //set_bit(108, mouse->idev.keybit); /* Down  */
 	
-	//input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_REL) | BIT_MASK(EV_ABS);
-	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
-    set_bit(103, input_dev->keybit); /* Up    */
+	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_REL);
+	//input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
+    
+	//set_bit(103, input_dev->keybit); /* Up    */
 
 	input_dev->keybit[BIT_WORD(BTN_MOUSE)] = BIT_MASK(BTN_LEFT) | BIT_MASK(BTN_RIGHT) | BIT_MASK(BTN_MIDDLE);
-	//input_dev->relbit[0] = BIT_MASK(REL_X) | BIT_MASK(REL_Y) | BIT_MASK(REL_WHEEL);
-	input_dev->absbit[0] = BIT_MASK(ABS_X) | BIT_MASK(ABS_Y);
+	input_dev->relbit[0] = BIT_MASK(REL_X) | BIT_MASK(REL_Y) | BIT_MASK(REL_WHEEL);
+	//input_dev->absbit[0] = BIT_MASK(ABS_X) | BIT_MASK(ABS_Y);
 	
-	input_set_abs_params(input_dev, ABS_X, MIN_SCREEN, MAX_SCREEN, 0, 0);
-	input_set_abs_params(input_dev, ABS_Y, MIN_SCREEN, MAX_SCREEN, 0, 0);
+	//input_set_abs_params(input_dev, ABS_X, MIN_SCREEN, MAX_SCREEN, 0, 0);
+	//input_set_abs_params(input_dev, ABS_Y, MIN_SCREEN, MAX_SCREEN, 0, 0);
 
+	
 	input_dev->name = DEVICE_NAME;	
 	input_set_drvdata(input_dev, mouse);
 	
