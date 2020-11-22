@@ -8,7 +8,7 @@ It still has some bugs and needs a lot of improvements.
 ### To run
 
 + Use `make` to generate .ko file
-+ Install using `insmod mousek.ko files`
++ Install using `insmod mousek.ko` file
 + Go to `cd /dev` and create `sudo mknod /dev/mousek c 247 0` where 247 will be replaced by major number given while installing this module. This major number can be viewed in logs using `dmesg`
 + Provide permission to this char file `sudo chmod 666 mousek`
 + To remove `rmmod mousek`
